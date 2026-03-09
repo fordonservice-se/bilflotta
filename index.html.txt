@@ -1,0 +1,151 @@
+!DOCTYPE html
+html lang=sv
+head
+    meta charset=UTF-8
+    meta name=viewport content=width=device-width, initial-scale=1.0
+    meta name=description content=Bilflottehantering - Hantera ditt företags bilflotta enkelt
+    meta name=author content=Bilflottehantering
+    titleBilflottehanteringtitle
+    link rel=stylesheet href=style.css
+    link rel=icon href=dataimagesvg+xml,svg xmlns=%22httpwww.w3.org2000svg%22 viewBox=%220 0 100 100%22text y=%22.9em%22 font-size=%2290%22🚗textsvg
+head
+body
+    !-- Login Screen --
+    div id=loginScreen class=screen active
+        div class=login-container
+            div class=logo🚗div
+            h1Bilflottehanteringh1
+            form id=loginForm
+                input type=text id=username placeholder=Användarnamn required autocomplete=username
+                input type=password id=password placeholder=Lösenord required autocomplete=current-password
+                button type=submitLogga inbutton
+            form
+            p class=hintDemo admin  admin123p
+        div
+    div
+
+    !-- Main App Screen --
+    div id=appScreen class=screen
+        !-- Header --
+        header
+            div class=header-content
+                h1🚗 Bilflottanh1
+                div class=header-actions
+                    span id=userGreetingspan
+                    button id=logoutBtn class=btn-secondaryLogga utbutton
+                div
+            div
+        header
+
+        !-- Notifications --
+        div id=notifications class=notificationsdiv
+
+        !-- Controls --
+        div class=controls
+            button id=addCarBtn class=btn-primary➕ Lägg till bilbutton
+            button id=importExcelBtn class=btn-success📥 Importera Excelbutton
+            button id=exportExcelBtn class=btn-secondary📊 Exportera Excelbutton
+            button id=exportPdfBtn class=btn-secondary📄 Exportera PDFbutton
+            button id=downloadTemplateBtn class=btn-secondary📋 Ladda ner mallbutton
+            
+            div class=search-filter
+                input type=text id=searchInput placeholder=🔍 Sök regnr, märke, modell...
+                select id=filterEnhet
+                    option value=Alla enheteroption
+                select
+            div
+        div
+
+        !-- Car Grid --
+        div id=carGrid class=car-griddiv
+    div
+
+    !-- Modal for AddEdit Car --
+    div id=carModal class=modal
+        div class=modal-content
+            span class=close&times;span
+            h2 id=modalTitleLägg till bilh2
+            form id=carForm
+                div class=form-row
+                    div class=form-group
+                        labelRegnummer label
+                        input type=text id=regNr required
+                    div
+                    div class=form-group
+                        labelMärke label
+                        input type=text id=marke required
+                    div
+                div
+
+                div class=form-row
+                    div class=form-group
+                        labelModell label
+                        input type=text id=modell required
+                    div
+                    div class=form-group
+                        labelEnhet label
+                        input type=text id=enhet required
+                    div
+                div
+
+                div class=form-row
+                    div class=form-group
+                        labelPlaceringlabel
+                        input type=text id=placering
+                    div
+                    div class=form-group
+                        labelAnsvarig Cheflabel
+                        input type=text id=ansvarigChef
+                    div
+                div
+
+                div class=form-group
+                    labelKontaktperson 1label
+                    input type=text id=kontakt1
+                div
+                div class=form-group
+                    labelKontaktperson 2label
+                    input type=text id=kontakt2
+                div
+                div class=form-group
+                    labelKontaktperson 3label
+                    input type=text id=kontakt3
+                div
+
+                div class=form-row
+                    div class=form-group
+                        labelBesiktningsdatumlabel
+                        input type=date id=besiktning
+                    div
+                    div class=form-group
+                        labelServicedatumlabel
+                        input type=date id=service
+                    div
+                div
+
+                div class=form-group
+                    labelBildlabel
+                    input type=file id=bildInput accept=image
+                    div id=imagePreviewdiv
+                div
+
+                div class=form-actions
+                    button type=submit class=btn-primarySparabutton
+                    button type=button id=cancelBtn class=btn-secondaryAvbrytbutton
+                div
+            form
+        div
+    div
+
+    !-- Hidden file input for Excel import --
+    input type=file id=excelFileInput accept=.xlsx,.xls style=display none;
+
+    !-- External Libraries --
+    script src=httpscdnjs.cloudflare.comajaxlibsjspdf2.5.1jspdf.umd.min.jsscript
+    script src=httpscdnjs.cloudflare.comajaxlibsjspdf-autotable3.5.31jspdf.plugin.autotable.min.jsscript
+    script src=httpscdnjs.cloudflare.comajaxlibsxlsx0.18.5xlsx.full.min.jsscript
+    
+    !-- Main App Script --
+    script src=app.jsscript
+body
+html

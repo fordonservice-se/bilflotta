@@ -1,0 +1,708 @@
+// ==========================================
+// BILFLOTTEHANTERING v1.0
+// ==========================================
+
+let currentUser = null;
+let cars = [];
+let editingCarId = null;
+
+const users = [
+    { username: 'admin', password: 'admin123', name: 'Admin' },
+    { username: 'chef', password: 'chef123', name: 'Avdelningschef' }
+];
+
+// ==========================================
+// INITIALIZATION
+// ==========================================
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadData();
+    setupEventListeners();
+    checkNotifications();
+    setInterval(checkNotifications, 60000);
+});
+
+// ==========================================
+// DATA PERSISTENCE
+// ==========================================
+
+function loadData() {
+    const savedCars = localStorage.getItem('cars');
+    if (savedCars) {
+        cars = JSON.parse(savedCars);
+    }
+}
+
+function saveData() {
+    localStorage.setItem('cars', JSON.stringify(cars));
+}
+
+// ==========================================
+// EVENT LISTENERS
+// ==========================================
+
+function setupEventListeners() {
+    document.getElementById('loginForm').addEventListener('submit', handleLogin);
+    document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+    document.getElementById('addCarBtn').addEventListener('click', () => {
+        editingCarId = null;
+        openCarModal();
+    });
+    
+    document.getElementById('importExcelBtn').addEventListener('click', () => {
+        document.getElementById('excelFileInput').click();
+    });
+    
+    document.getElementById('excelFileInput').addEventListener('change', handleExcelImport);
+    document.getElementById('downloadTemplateBtn').addEventListener('click', downloadExcelTemplate);
+    document.getElementById('carForm').addEventListener('submit', handleCarSubmit);
+    document.getElementById('cancelBtn').addEventListener('click', closeCarModal);
+    document.querySelector('.close').addEventListener('click', closeCarModal);
+    document.getElementById('searchInput').addEventListener('input', filterCars);
+    document.getElementById('filterEnhet').addEventListener('change', filterCars);
+    document.getElementById('exportExcelBtn').addEventListener('click', exportToExcel);
+    document.getElementById('exportPdfBtn').addEventListener('click', exportToPDF);
+    document.getElementById('bildInput').addEventListener('change', handleImageUpload);
+}
+
+// ==========================================
+// EXCEL IMPORT
+// ==========================================
+
+function handleExcelImport(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    
+    reader.onload = function(event) {
+        try {
+            const data = new Uint8Array(event.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+            processImportedData(jsonData);
+        } catch (error) {
+            alert('Fel vid inläsning av Excel-fil: ' + error.message);
+        }
+        e.target.value = '';
+    };
+    
+    reader.readAsArrayBuffer(file);
+}
+
+function processImportedData(jsonData) {
+    const results = {
+        success: 0,
+        updated: 0,
+        errors: [],
+        warnings: []
+    };
+    
+    const importedCars = [];
+    
+    jsonData.forEach((row, index) => {
+        try {
+            const car = {
+                id: Date.now() + index,
+                regNr: getColumnValue(row, ['Regnummer', 'RegNr', 'Reg', 'Registration']),
+                marke: getColumnValue(row, ['Märke', 'Marke', 'Make', 'Brand']),
+                modell: getColumnValue(row, ['Modell', 'Model']),
+                enhet: getColumnValue(row, ['Enhet', 'Unit', 'Department']),
+                placering: getColumnValue(row, ['Placering', 'Location', 'Place']),
+                ansvarigChef: getColumnValue(row, ['Ansvarig Chef', 'Chef', 'Manager', 'Responsible']),
+                kontakt1: getColumnValue(row, ['Kontaktperson 1', 'Kontakt 1', 'Contact 1']),
+                kontakt2: getColumnValue(row, ['Kontaktperson 2', 'Kontakt 2', 'Contact 2']),
+                kontakt3: getColumnValue(row, ['Kontaktperson 3', 'Kontakt 3', 'Contact 3']),
+                besiktning: formatExcelDate(getColumnValue(row, ['Besiktning', 'Besiktningsdatum', 'Inspection'])),
+                service: formatExcelDate(getColumnValue(row, ['Service', 'Servicedatum', 'Service Date'])),
+                bild: ''
+            };
+            
+            if (!car.regNr) {
+                results.errors.push(`Rad ${index + 2}: Regnummer saknas`);
+                return;
+            }
+            
+            if (!car.marke || !car.modell) {
+                results.warnings.push(`Rad ${index + 2}: ${car.regNr} - Märke eller modell saknas`);
+            }
+            
+            const existingCarIndex = cars.findIndex(c => 
+                c.regNr.toLowerCase() === car.regNr.toLowerCase()
+            );
+            
+            if (existingCarIndex >= 0) {
+                car.id = cars[existingCarIndex].id;
+                car.bild = cars[existingCarIndex].bild;
+                cars[existingCarIndex] = car;
+                results.updated++;
+                results.warnings.push(`${car.regNr} - Uppdaterad`);
+            } else {
+                importedCars.push(car);
+                results.success++;
+            }
+            
+        } catch (error) {
+            results.errors.push(`Rad ${index + 2}: ${error.message}`);
+        }
+    });
+    
+    cars = [...cars, ...importedCars];
+    
+    saveData();
+    renderCars();
+    updateFilterOptions();
+    checkNotifications();
+    showImportResults(results);
+}
+
+function getColumnValue(row, possibleNames) {
+    for (let name of possibleNames) {
+        if (row[name] !== undefined && row[name] !== null && row[name] !== '') {
+            return String(row[name]).trim();
+        }
+    }
+    return '';
+}
+
+function formatExcelDate(value) {
+    if (!value) return '';
+    
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return value;
+    }
+    
+    if (!isNaN(value)) {
+        const date = XLSX.SSF.parse_date_code(value);
+        return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
+    }
+    
+    try {
+        const date = new Date(value);
+        if (!isNaN(date.getTime())) {
+            return date.toISOString().split('T')[0];
+        }
+    } catch (e) {}
+    
+    return '';
+}
+
+function showImportResults(results) {
+    const totalProcessed = results.success + results.updated + results.errors.length;
+    
+    let html = `
+        <div class="import-status">
+            <h3>📥 Importresultat</h3>
+            <p><strong>${totalProcessed}</strong> rader processade</p>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: ${(results.success + results.updated) / totalProcessed * 100}%"></div>
+            </div>
+            <ul>
+                <li class="success">✅ ${results.success} nya bilar tillagda</li>
+                <li class="warning">🔄 ${results.updated} bilar uppdaterade</li>
+                <li class="error">❌ ${results.errors.length} fel</li>
+            </ul>
+    `;
+    
+    if (results.warnings.length > 0) {
+        html += '<h4>Varningar:</h4><ul>';
+        results.warnings.forEach(w => {
+            html += `<li class="warning">${w}</li>`;
+        });
+        html += '</ul>';
+    }
+    
+    if (results.errors.length > 0) {
+        html += '<h4>Fel:</h4><ul>';
+        results.errors.forEach(e => {
+            html += `<li class="error">${e}</li>`;
+        });
+        html += '</ul>';
+    }
+    
+    html += '<button class="btn-primary" onclick="closeImportStatus()">Stäng</button></div>';
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'importOverlay';
+    overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1999;';
+    overlay.innerHTML = html;
+    
+    document.body.appendChild(overlay);
+    
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeImportStatus();
+    });
+}
+
+function closeImportStatus() {
+    const overlay = document.getElementById('importOverlay');
+    if (overlay) overlay.remove();
+}
+
+// ==========================================
+// DOWNLOAD EXCEL TEMPLATE
+// ==========================================
+
+function downloadExcelTemplate() {
+    const templateData = [
+        {
+            'Regnummer': 'ABC123',
+            'Märke': 'Volvo',
+            'Modell': 'V90',
+            'Enhet': 'Försäljning',
+            'Placering': 'Stockholm',
+            'Ansvarig Chef': 'Anna Andersson',
+            'Kontaktperson 1': 'Erik Eriksson',
+            'Kontaktperson 2': 'Maria Nilsson',
+            'Kontaktperson 3': 'Johan Svensson',
+            'Besiktning': '2024-12-31',
+            'Service': '2024-11-30'
+        },
+        {
+            'Regnummer': 'XYZ789',
+            'Märke': 'Tesla',
+            'Modell': 'Model 3',
+            'Enhet': 'IT',
+            'Placering': 'Göteborg',
+            'Ansvarig Chef': 'Lisa Larsson',
+            'Kontaktperson 1': 'Peter Pettersson',
+            'Kontaktperson 2': '',
+            'Kontaktperson 3': '',
+            'Besiktning': '2025-03-15',
+            'Service': '2024-12-20'
+        }
+    ];
+    
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    ws['!cols'] = [
+        { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 },
+        { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 12 }
+    ];
+    
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Bilflotta Mall');
+    XLSX.writeFile(wb, 'bilflotta_mall.xlsx');
+}
+
+// ==========================================
+// AUTHENTICATION
+// ==========================================
+
+function handleLogin(e) {
+    e.preventDefault();
+    
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+    
+    const user = users.find(u => u.username === username && u.password === password);
+    
+    if (user) {
+        currentUser = user;
+        document.getElementById('userGreeting').textContent = `Välkommen, ${user.name}`;
+        showScreen('appScreen');
+        renderCars();
+        updateFilterOptions();
+    } else {
+        alert('Felaktigt användarnamn eller lösenord');
+    }
+}
+
+function handleLogout() {
+    currentUser = null;
+    showScreen('loginScreen');
+    document.getElementById('loginForm').reset();
+}
+
+function showScreen(screenId) {
+    document.querySelectorAll('.screen').forEach(screen => {
+        screen.classList.remove('active');
+    });
+    document.getElementById(screenId).classList.add('active');
+}
+
+// ==========================================
+// CAR MANAGEMENT
+// ==========================================
+
+function openCarModal(car = null) {
+    const modal = document.getElementById('carModal');
+    const form = document.getElementById('carForm');
+    
+    if (car) {
+        editingCarId = car.id;
+        document.getElementById('modalTitle').textContent = 'Redigera bil';
+        
+        document.getElementById('regNr').value = car.regNr || '';
+        document.getElementById('marke').value = car.marke || '';
+        document.getElementById('modell').value = car.modell || '';
+        document.getElementById('enhet').value = car.enhet || '';
+        document.getElementById('placering').value = car.placering || '';
+        document.getElementById('ansvarigChef').value = car.ansvarigChef || '';
+        document.getElementById('kontakt1').value = car.kontakt1 || '';
+        document.getElementById('kontakt2').value = car.kontakt2 || '';
+        document.getElementById('kontakt3').value = car.kontakt3 || '';
+        document.getElementById('besiktning').value = car.besiktning || '';
+        document.getElementById('service').value = car.service || '';
+        
+        if (car.bild) {
+            document.getElementById('imagePreview').innerHTML = `<img src="${car.bild}" alt="Bil">`;
+        }
+    } else {
+        editingCarId = null;
+        document.getElementById('modalTitle').textContent = 'Lägg till bil';
+        form.reset();
+        document.getElementById('imagePreview').innerHTML = '';
+    }
+    
+    modal.classList.add('active');
+}
+
+function closeCarModal() {
+    document.getElementById('carModal').classList.remove('active');
+    document.getElementById('carForm').reset();
+    document.getElementById('imagePreview').innerHTML = '';
+    editingCarId = null;
+}
+
+function handleCarSubmit(e) {
+    e.preventDefault();
+    
+    const carData = {
+        id: editingCarId || Date.now(),
+        regNr: document.getElementById('regNr').value,
+        marke: document.getElementById('marke').value,
+        modell: document.getElementById('modell').value,
+        enhet: document.getElementById('enhet').value,
+        placering: document.getElementById('placering').value,
+        ansvarigChef: document.getElementById('ansvarigChef').value,
+        kontakt1: document.getElementById('kontakt1').value,
+        kontakt2: document.getElementById('kontakt2').value,
+        kontakt3: document.getElementById('kontakt3').value,
+        besiktning: document.getElementById('besiktning').value,
+        service: document.getElementById('service').value,
+        bild: document.getElementById('imagePreview').querySelector('img')?.src || ''
+    };
+    
+    if (editingCarId) {
+        const index = cars.findIndex(c => c.id === editingCarId);
+        cars[index] = carData;
+    } else {
+        cars.push(carData);
+    }
+    
+    saveData();
+    renderCars();
+    updateFilterOptions();
+    closeCarModal();
+    checkNotifications();
+}
+
+function deleteCar(id) {
+    if (confirm('Är du säker på att du vill ta bort denna bil?')) {
+        cars = cars.filter(c => c.id !== id);
+        saveData();
+        renderCars();
+        updateFilterOptions();
+        checkNotifications();
+    }
+}
+
+function handleImageUpload(e) {
+    const file = e.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            document.getElementById('imagePreview').innerHTML = 
+                `<img src="${event.target.result}" alt="Förhandsvisning">`;
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+// ==========================================
+// RENDERING
+// ==========================================
+
+function renderCars(filteredCars = null) {
+    const carsToRender = filteredCars || cars;
+    const grid = document.getElementById('carGrid');
+    
+    if (carsToRender.length === 0) {
+        grid.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">🚗</div>
+                <h3>Inga bilar hittades</h3>
+                <p>Lägg till din första bil eller importera från Excel</p>
+            </div>
+        `;
+        return;
+    }
+    
+    grid.innerHTML = carsToRender.map(car => createCarCard(car)).join('');
+}
+
+function createCarCard(car) {
+    const status = getCarStatus(car);
+    const statusClass = status.type;
+    const statusText = status.text;
+    
+    const contacts = [car.kontakt1, car.kontakt2, car.kontakt3]
+        .filter(c => c)
+        .map(c => `<p>• ${c}</p>`)
+        .join('');
+    
+    return `
+        <div class="car-card">
+            <div class="car-image">
+                ${car.bild ? `<img src="${car.bild}" alt="${car.marke} ${car.modell}">` : '🚗'}
+                <span class="status-badge status-${statusClass}">${statusText}</span>
+            </div>
+            <div class="car-content">
+                <div class="car-header">
+                    <div class="car-regnr">${car.regNr}</div>
+                    <div class="car-make-model">${car.marke} ${car.modell}</div>
+                </div>
+                
+                <div class="car-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Enhet</span>
+                        <span class="detail-value">${car.enhet || '-'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Placering</span>
+                        <span class="detail-value">${car.placering || '-'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Ansvarig Chef</span>
+                        <span class="detail-value">${car.ansvarigChef || '-'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Besiktning</span>
+                        <span class="detail-value">${formatDate(car.besiktning)}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Service</span>
+                        <span class="detail-value">${formatDate(car.service)}</span>
+                    </div>
+                </div>
+                
+                ${contacts ? `
+                    <div class="car-contacts">
+                        <h4>Kontaktpersoner</h4>
+                        ${contacts}
+                    </div>
+                ` : ''}
+                
+                <div class="car-actions">
+                    <button class="btn-primary" onclick="openCarModal(${JSON.stringify(car).replace(/"/g, '&quot;')})">
+                        ✏️ Redigera
+                    </button>
+                    <button class="btn-danger" onclick="deleteCar(${car.id})">
+                        🗑️ Ta bort
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// ==========================================
+// NOTIFICATIONS
+// ==========================================
+
+function checkNotifications() {
+    if (!currentUser) return;
+    
+    const notifications = [];
+    const today = new Date();
+    
+    cars.forEach(car => {
+        if (car.besiktning) {
+            const besiktningDate = new Date(car.besiktning);
+            const daysUntil = Math.ceil((besiktningDate - today) / (1000 * 60 * 60 * 24));
+            
+            if (daysUntil < 0) {
+                notifications.push({
+                    type: 'danger',
+                    message: `⚠️ ${car.regNr} - Besiktningen har gått ut!`
+                });
+            } else if (daysUntil <= 30) {
+                notifications.push({
+                    type: 'warning',
+                    message: `⏰ ${car.regNr} - Besiktning om ${daysUntil} dagar`
+                });
+            }
+        }
+        
+        if (car.service) {
+            const serviceDate = new Date(car.service);
+            const daysUntil = Math.ceil((serviceDate - today) / (1000 * 60 * 60 * 24));
+            
+            if (daysUntil < 0) {
+                notifications.push({
+                    type: 'danger',
+                    message: `⚠️ ${car.regNr} - Servicedatum har passerat!`
+                });
+            } else if (daysUntil <= 30) {
+                notifications.push({
+                    type: 'warning',
+                    message: `⏰ ${car.regNr} - Service om ${daysUntil} dagar`
+                });
+            }
+        }
+    });
+    
+    displayNotifications(notifications);
+}
+
+function displayNotifications(notifications) {
+    const container = document.getElementById('notifications');
+    container.innerHTML = notifications.map(n => `
+        <div class="notification ${n.type}">
+            ${n.message}
+        </div>
+    `).join('');
+}
+
+function getCarStatus(car) {
+    const today = new Date();
+    let earliestIssue = null;
+    let type = 'ok';
+    
+    if (car.besiktning) {
+        const besiktningDate = new Date(car.besiktning);
+        const daysUntil = Math.ceil((besiktningDate - today) / (1000 * 60 * 60 * 24));
+        
+        if (daysUntil < 0) {
+            return { type: 'danger', text: 'Utgången!' };
+        } else if (daysUntil <= 30) {
+            type = 'warning';
+            earliestIssue = daysUntil;
+        }
+    }
+    
+    if (car.service) {
+        const serviceDate = new Date(car.service);
+        const daysUntil = Math.ceil((serviceDate - today) / (1000 * 60 * 60 * 24));
+        
+        if (daysUntil < 0) {
+            return { type: 'danger', text: 'Service!' };
+        } else if (daysUntil <= 30) {
+            if (!earliestIssue || daysUntil < earliestIssue) {
+                type = 'warning';
+                earliestIssue = daysUntil;
+            }
+        }
+    }
+    
+    if (type === 'warning') {
+        return { type: 'warning', text: `${earliestIssue} dagar` };
+    }
+    
+    return { type: 'ok', text: 'OK' };
+}
+
+// ==========================================
+// SEARCH & FILTER
+// ==========================================
+
+function filterCars() {
+    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+    const enhetFilter = document.getElementById('filterEnhet').value;
+    
+    let filtered = cars;
+    
+    if (searchTerm) {
+        filtered = filtered.filter(car => 
+            car.regNr.toLowerCase().includes(searchTerm) ||
+            car.marke.toLowerCase().includes(searchTerm) ||
+            car.modell.toLowerCase().includes(searchTerm) ||
+            (car.placering && car.placering.toLowerCase().includes(searchTerm))
+        );
+    }
+    
+    if (enhetFilter) {
+        filtered = filtered.filter(car => car.enhet === enhetFilter);
+    }
+    
+    renderCars(filtered);
+}
+
+function updateFilterOptions() {
+    const enheter = [...new Set(cars.map(car => car.enhet).filter(e => e))];
+    const select = document.getElementById('filterEnhet');
+    
+    select.innerHTML = '<option value="">Alla enheter</option>' +
+        enheter.map(e => `<option value="${e}">${e}</option>`).join('');
+}
+
+// ==========================================
+// EXPORT FUNCTIONS
+// ==========================================
+
+function exportToExcel() {
+    const data = cars.map(car => ({
+        'Regnummer': car.regNr,
+        'Märke': car.marke,
+        'Modell': car.modell,
+        'Enhet': car.enhet || '',
+        'Placering': car.placering || '',
+        'Ansvarig Chef': car.ansvarigChef || '',
+        'Kontaktperson 1': car.kontakt1 || '',
+        'Kontaktperson 2': car.kontakt2 || '',
+        'Kontaktperson 3': car.kontakt3 || '',
+        'Besiktning': car.besiktning || '',
+        'Service': car.service || ''
+    }));
+    
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Bilflotta');
+    
+    XLSX.writeFile(wb, `bilflotta_${formatDateForFile()}.xlsx`);
+}
+
+function exportToPDF() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    
+    doc.setFontSize(18);
+    doc.text('Bilflotta', 14, 20);
+    
+    doc.setFontSize(10);
+    doc.text(`Exporterad: ${new Date().toLocaleDateString('sv-SE')}`, 14, 28);
+    
+    const tableData = cars.map(car => [
+        car.regNr,
+        `${car.marke} ${car.modell}`,
+        car.enhet || '-',
+        car.placering || '-',
+        formatDate(car.besiktning),
+        formatDate(car.service)
+    ]);
+    
+    doc.autoTable({
+        startY: 35,
+        head: [['Regnr', 'Bil', 'Enhet', 'Placering', 'Besiktning', 'Service']],
+        body: tableData,
+        theme: 'grid',
+        headStyles: { fillColor: [37, 99, 235] }
+    });
+    
+    doc.save(`bilflotta_${formatDateForFile()}.pdf`);
+}
+
+// ==========================================
+// UTILITY FUNCTIONS
+// ==========================================
+
+function formatDate(dateString) {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('sv-SE');
+}
+
+function formatDateForFile() {
+    return new Date().toISOString().split('T')[0];
+}
